@@ -1,0 +1,49 @@
+framework:
+  name: nemo-multi-challenge
+  pkg_name: multi_challenge_bridge
+  full_name: NeMo MultiChallenge bridge
+  description: Wraps local nemo-multi-challenge provider runner for NeMo Evaluator.
+  url: https://github.com/PKU-Baichuan-MLSystemLab/MultiChallenge
+
+defaults:
+  command: >-
+    python3 /workspace/core_evals/multi_challenge_bridge/provider_runner.py
+    --benchmark-name {{config.type}}
+    --output-dir {{config.output_dir}}
+    --candidate-base-url "{{target.api_endpoint.url | replace('/chat/completions', '')}}"
+    --candidate-model-id "{{target.api_endpoint.model_id}}"
+    --candidate-api-key "{% if target.api_endpoint.get('api_key_name') is not none %}${{target.api_endpoint.get('api_key_name')}}{% elif target.api_endpoint.get('api_key') is not none %}${{target.api_endpoint.get('api_key')}}{% endif %}"
+    --parallelism {{config.params.parallelism}}
+    --request-timeout {{config.params.request_timeout}}
+    --limit-samples {{config.params.limit_samples}}
+    --request-params-json '{"temperature": {{config.params.temperature}}, "top_p": {{config.params.top_p}}, "max_tokens": {{config.params.max_new_tokens}}, "multichallenge_input_data": "{{config.params.extra.multichallenge_input_data}}", "multichallenge_judge_base_url": "{{config.params.extra.multichallenge_judge_base_url}}", "multichallenge_judge_model_id": "{{config.params.extra.multichallenge_judge_model_id}}", "multichallenge_judge_api_key": "{{config.params.extra.multichallenge_judge_api_key}}", "multichallenge_judge_temperature": {{config.params.extra.multichallenge_judge_temperature}}, "multichallenge_judge_top_p": {{config.params.extra.multichallenge_judge_top_p}}, "multichallenge_judge_max_tokens": {{config.params.extra.multichallenge_judge_max_tokens}}}'
+    --resume 1
+    --show-live-stats 1
+  config:
+    params:
+      temperature: 0.0
+      top_p: 1.0
+      max_new_tokens: 4096
+      parallelism: 8
+      request_timeout: 900
+      limit_samples: -1
+      extra:
+        multichallenge_input_data: ""
+        multichallenge_judge_base_url: ""
+        multichallenge_judge_model_id: ""
+        multichallenge_judge_api_key: ""
+        multichallenge_judge_temperature: 0.0
+        multichallenge_judge_top_p: 1.0
+        multichallenge_judge_max_tokens: 512
+  target:
+    api_endpoint:
+      type: chat
+
+evaluations:
+  - name: nemo_multi_challenge
+    description: MultiChallenge multi-turn conversation benchmark.
+    defaults:
+      config:
+        type: nemo_multi_challenge
+        supported_endpoint_types:
+          - chat
