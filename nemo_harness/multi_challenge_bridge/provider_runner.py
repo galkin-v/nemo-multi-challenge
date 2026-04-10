@@ -4,6 +4,8 @@ import argparse
 import json
 import os
 import re
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +32,35 @@ JUDGE_PROMPT = """You are evaluating whether a model response satisfies a criter
 Respond with JSON only:
 {{"reasoning": "short reasoning", "verdict": "YES" or "NO"}}
 """
+
+_TRACE_WRITE_LOCK = threading.Lock()
+
+
+def _sanitize_for_trace(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            key_l = str(k).lower()
+            if any(token in key_l for token in ("authorization", "api_key", "token", "secret", "password")):
+                out[str(k)] = "***REDACTED***"
+            else:
+                out[str(k)] = _sanitize_for_trace(v)
+        return out
+    if isinstance(value, list):
+        return [_sanitize_for_trace(v) for v in value]
+    return value
+
+
+def _append_trace(trace_path: Path | None, payload: Mapping[str, Any]) -> None:
+    if trace_path is None:
+        return
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    row = {"timestamp": datetime.now(UTC).isoformat(), **_sanitize_for_trace(dict(payload))}
+    line = json.dumps(row, ensure_ascii=False)
+    with _TRACE_WRITE_LOCK:
+        with trace_path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+            handle.write("\n")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -189,6 +220,9 @@ def _call_chat_completion(
     messages: list[dict[str, str]],
     request_timeout: int,
     request_params: Mapping[str, Any],
+    trace_path: Path | None = None,
+    trace_role: str = "target",
+    trace_context: Mapping[str, Any] | None = None,
 ) -> tuple[str, str | None]:
     endpoint = f"{_normalize_base_url(base_url)}/chat/completions"
     headers = {"Content-Type": "application/json"}
@@ -201,6 +235,7 @@ def _call_chat_completion(
     }
     payload.update(request_params)
 
+    started = time.perf_counter()
     try:
         response = requests.post(
             endpoint,
@@ -219,10 +254,48 @@ def _call_chat_completion(
         message = choice.get("message") if isinstance(choice, Mapping) else {}
         content = _first_text_content(message)
         if content:
+            _append_trace(
+                trace_path,
+                {
+                    "role": trace_role,
+                    "url": endpoint,
+                    "model_id": model_id,
+                    "request": payload,
+                    "response": {"content": content},
+                    "status_code": response.status_code,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                    "context": dict(trace_context or {}),
+                },
+            )
             return content, None
 
+        _append_trace(
+            trace_path,
+            {
+                "role": trace_role,
+                "url": endpoint,
+                "model_id": model_id,
+                "request": payload,
+                "error": "ExternalPredictionError: empty content",
+                "status_code": response.status_code,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                "context": dict(trace_context or {}),
+            },
+        )
         return "", "ExternalPredictionError: empty content"
     except Exception as exc:
+        _append_trace(
+            trace_path,
+            {
+                "role": trace_role,
+                "url": endpoint,
+                "model_id": model_id,
+                "request": payload,
+                "error": f"{type(exc).__name__}: {exc}",
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                "context": dict(trace_context or {}),
+            },
+        )
         return "", f"{type(exc).__name__}: {exc}"
 
 
@@ -310,6 +383,8 @@ def _make_prediction(
     request_timeout: int,
     candidate_generation_params: Mapping[str, Any],
     judge_generation_params: Mapping[str, Any],
+    target_trace_path: Path | None = None,
+    judge_trace_path: Path | None = None,
 ) -> dict[str, Any]:
     question_id = str(row.get("QUESTION_ID", sample_id))
     axis = str(row.get("AXIS", "UNKNOWN"))
@@ -333,6 +408,9 @@ def _make_prediction(
         messages=messages,
         request_timeout=request_timeout,
         request_params=candidate_generation_params,
+        trace_path=target_trace_path,
+        trace_role="target",
+        trace_context={"sample_id": sample_id, "question_id": question_id},
     )
 
     judge_verdict: str | None = None
@@ -351,6 +429,9 @@ def _make_prediction(
             messages=[{"role": "user", "content": judge_prompt}],
             request_timeout=request_timeout,
             request_params=judge_generation_params,
+            trace_path=judge_trace_path,
+            trace_role="judge",
+            trace_context={"sample_id": sample_id, "question_id": question_id},
         )
         if judge_error is None:
             judge_verdict, judge_reasoning = _parse_judge_response(judge_text)
@@ -406,6 +487,9 @@ def main() -> int:
     started_at = datetime.now(UTC)
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    trace_dir = output_dir / "traces"
+    target_trace_path = trace_dir / "target.jsonl"
+    judge_trace_path = trace_dir / "judge.jsonl"
 
     show_live_stats = _to_bool(args.show_live_stats)
     resume = _to_bool(args.resume)
@@ -464,6 +548,8 @@ def main() -> int:
                 request_timeout=max(1, args.request_timeout),
                 candidate_generation_params=candidate_generation_params,
                 judge_generation_params=judge_generation_params,
+                target_trace_path=target_trace_path,
+                judge_trace_path=judge_trace_path,
             ): idx
             for idx in pending_indices
         }
