@@ -16,7 +16,7 @@ defaults:
     --parallelism {{config.params.parallelism}}
     --request-timeout {{config.params.request_timeout}}
     --limit-samples {{config.params.limit_samples}}
-    --request-params-json '{"temperature": {{config.params.temperature}}, "top_p": {{config.params.top_p}}, "max_tokens": {{config.params.max_new_tokens}}, "multichallenge_input_data": "{{config.params.extra.multichallenge_input_data}}", "multichallenge_judge_base_url": "{{config.params.extra.multichallenge_judge_base_url}}", "multichallenge_judge_model_id": "{{config.params.extra.multichallenge_judge_model_id}}", "multichallenge_judge_api_key": "{{config.params.extra.multichallenge_judge_api_key}}", "multichallenge_judge_temperature": {{config.params.extra.multichallenge_judge_temperature}}, "multichallenge_judge_top_p": {{config.params.extra.multichallenge_judge_top_p}}, "multichallenge_judge_max_tokens": {{config.params.extra.multichallenge_judge_max_tokens}}}'
+    --request-params-json '{"temperature": {{config.params.temperature}}, "top_p": {{config.params.top_p}}, "max_tokens": {{config.params.max_new_tokens}}, "multichallenge_input_data": "{{config.params.extra.multichallenge_input_data}}", "multichallenge_judge_base_url": "{{config.params.extra.multichallenge_judge_base_url}}", "multichallenge_judge_model_id": "{{config.params.extra.multichallenge_judge_model_id}}", "multichallenge_judge_api_key": "{{config.params.extra.multichallenge_judge_api_key}}", "multichallenge_judge_temperature": {{config.params.extra.multichallenge_judge_temperature}}, "multichallenge_judge_top_p": {{config.params.extra.multichallenge_judge_top_p}}, "multichallenge_judge_max_tokens": {{config.params.extra.multichallenge_judge_max_tokens}}, "multichallenge_judge_chat_template_kwargs": {{config.params.extra.multichallenge_judge_chat_template_kwargs | tojson}}}'
     --resume 1
     --show-live-stats 1
   config:
@@ -35,6 +35,7 @@ defaults:
         multichallenge_judge_temperature: 0.0
         multichallenge_judge_top_p: 1.0
         multichallenge_judge_max_tokens: 512
+        multichallenge_judge_chat_template_kwargs: {}
   target:
     api_endpoint:
       type: chat
